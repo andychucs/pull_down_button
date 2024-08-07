@@ -42,7 +42,7 @@ enum PullDownMenuItemsOrder {
   /// For example, a list of items (1, 2, 3) will result in the menu rendering
   /// them like this:
   ///
-  /// ```
+  /// ```text
   /// -----
   /// | 1 |
   /// -----
@@ -59,7 +59,7 @@ enum PullDownMenuItemsOrder {
   /// For example, a list of items (1, 2, 3) will result in the menu rendering
   /// them like this:
   ///
-  /// ```
+  /// ```text
   /// -----
   /// | 3 |
   /// -----
@@ -79,7 +79,7 @@ enum PullDownMenuItemsOrder {
   /// For example, a list of items (1, 2, 3) will result in the menu rendering
   /// them like this:
   ///
-  /// ```
+  /// ```text
   /// -----
   /// | 1 |
   /// -----
@@ -95,7 +95,7 @@ enum PullDownMenuItemsOrder {
   /// For example, a list of items (1, 2, 3) will result in the menu rendering
   /// them like this:
   ///
-  /// ```
+  /// ```text
   /// -----
   /// | 3 |
   /// -----
@@ -117,7 +117,11 @@ enum PullDownButtonAnimationState {
 
   /// The menu is opened by calling [showMenu] using
   /// [PullDownButton.buttonBuilder]'s button widget.
-  opened,
+  opened;
+
+  /// Whether the [PullDownMenuButtonBuilder]s button is pressed and the menu
+  /// is open.
+  bool get isOpen => this == PullDownButtonAnimationState.opened;
 }
 
 /// Used to configure what horizontal part of the
@@ -212,6 +216,8 @@ class PullDownButton extends StatefulWidget {
     this.animationBuilder = defaultAnimationBuilder,
     this.routeTheme,
     this.animationAlignmentOverride,
+    this.useRootNavigator = false,
+    this.routeSettings,
     this.interceptMouseEvents = false,
   });
 
@@ -337,6 +343,21 @@ class PullDownButton extends StatefulWidget {
   @experimental
   final Alignment? animationAlignmentOverride;
 
+  /// Whether to use the root navigator to show the pull-down menu.
+  ///
+  /// Defaults to `false`.
+  ///
+  /// This property allows to show the pull-down menu on the root navigator
+  /// instead of the current navigator, useful for nested navigation scenarios
+  /// where the popup menu wouldn't be visible or would be clipped by the
+  /// parent navigators.
+  final bool useRootNavigator;
+
+  /// Optional route settings for the pull-down menu.
+  ///
+  /// See [RouteSettings] for details.
+  final RouteSettings? routeSettings;
+
   /// Determines whether to use PointerInterceptor to intercept pointer events
   /// on the menu.
   ///
@@ -360,13 +381,13 @@ class PullDownButton extends StatefulWidget {
     PullDownButtonAnimationState state,
     Widget child,
   ) {
-    final isPressed = state == PullDownButtonAnimationState.opened;
+    final isOpen = state.isOpen;
 
     // All of the values where eyeballed using the iOS 16 Simulator.
     return AnimatedOpacity(
-      opacity: isPressed ? 0.4 : 1,
-      duration: Duration(milliseconds: isPressed ? 100 : 200),
-      curve: isPressed ? Curves.fastLinearToSlowEaseIn : Curves.easeIn,
+      opacity: isOpen ? 0.4 : 1,
+      duration: Duration(milliseconds: isOpen ? 100 : 200),
+      curve: isOpen ? Curves.fastLinearToSlowEaseIn : Curves.easeIn,
       child: child,
     );
   }
@@ -379,10 +400,18 @@ class _PullDownButtonState extends State<PullDownButton> {
   PullDownButtonAnimationState state = PullDownButtonAnimationState.closed;
 
   Future<void> showButtonMenu() async {
-    var button = context.getRect;
+    final navigator = Navigator.of(
+      context,
+      rootNavigator: widget.useRootNavigator,
+    );
+
+    final overlay = navigator.overlay!.context.currentRenderBox;
+    var button = context.getRect(ancestor: overlay);
+
     if (widget.buttonAnchor != null) {
       button = _anchorToButtonPart(context, button, widget.buttonAnchor!);
     }
+
     final animationAlignment = widget.animationAlignmentOverride ??
         PullDownMenuRoute.animationAlignment(context, button);
 
@@ -405,6 +434,8 @@ class _PullDownButtonState extends State<PullDownButton> {
       animationAlignment: animationAlignment,
       menuOffset: widget.menuOffset,
       scrollController: widget.scrollController,
+      useRootNavigator: widget.useRootNavigator,
+      routeSettings: widget.routeSettings,
       interceptMouseEvents: widget.interceptMouseEvents,
     );
 
@@ -461,6 +492,11 @@ class _PullDownButtonState extends State<PullDownButton> {
 /// [routeTheme] is used to define the theme of the route used to display
 /// the pull-down menu launched from this function.
 ///
+/// [useRootNavigator] is used to determine whether to use the root navigator
+/// to show the pull-down menu. Defaults to `false`.
+///
+/// Use [routeSettings] to set optional route settings for the pull-down menu.
+///
 /// [interceptMouseEvents] is used to determine whether to use PointerInterceptor
 /// to intercept pointer events on the menu.
 ///
@@ -489,6 +525,8 @@ Future<void> showPullDownMenu({
   ScrollController? scrollController,
   PullDownMenuCanceled? onCanceled,
   PullDownMenuRouteTheme? routeTheme,
+  bool useRootNavigator = false,
+  RouteSettings? routeSettings,
   bool interceptMouseEvents = false,
 }) async {
   if (items.isEmpty) return;
@@ -506,6 +544,8 @@ Future<void> showPullDownMenu({
     animationAlignment: PullDownMenuRoute.animationAlignment(context, position),
     menuOffset: menuOffset,
     scrollController: scrollController,
+    useRootNavigator: useRootNavigator,
+    routeSettings: routeSettings,
     interceptMouseEvents: interceptMouseEvents,
   );
 
@@ -529,9 +569,11 @@ Future<VoidCallback?> _showMenu<VoidCallback>({
   required Alignment animationAlignment,
   required double menuOffset,
   required ScrollController? scrollController,
+  required bool useRootNavigator,
+  required RouteSettings? routeSettings,
   required bool interceptMouseEvents,
 }) {
-  final navigator = Navigator.of(context);
+  final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
 
   return navigator.push<VoidCallback>(
     PullDownMenuRoute(
@@ -549,6 +591,7 @@ Future<VoidCallback?> _showMenu<VoidCallback>({
       alignment: animationAlignment,
       menuOffset: menuOffset,
       scrollController: scrollController,
+      settings: routeSettings,
       interceptMouseEvents: interceptMouseEvents,
     ),
   );
@@ -564,22 +607,15 @@ Rect _anchorToButtonPart(
 ) {
   final textDirection = Directionality.of(context);
 
-  final double side;
-
-  switch (anchor) {
-    case PullDownMenuAnchor.start:
-      side = textDirection == TextDirection.ltr
-          ? buttonRect.left
-          : buttonRect.right;
-      break;
-    case PullDownMenuAnchor.center:
-      side = buttonRect.center.dx;
-      break;
-    case PullDownMenuAnchor.end:
-      side = textDirection == TextDirection.ltr
-          ? buttonRect.right
-          : buttonRect.left;
-  }
+  final side = switch (anchor) {
+    PullDownMenuAnchor.start when textDirection == TextDirection.ltr =>
+      buttonRect.left,
+    PullDownMenuAnchor.start => buttonRect.right,
+    PullDownMenuAnchor.center => buttonRect.center.dx,
+    PullDownMenuAnchor.end when textDirection == TextDirection.ltr =>
+      buttonRect.right,
+    PullDownMenuAnchor.end => buttonRect.left,
+  };
 
   return Rect.fromLTRB(
     side,
